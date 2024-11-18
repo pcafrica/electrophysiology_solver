@@ -329,15 +329,17 @@ IonicModel<dim>::setup_problem()
   fe_values =
     std::make_unique<FEValues<dim>>(mapping,
                                     fe,
-                                    QGauss<dim>(2 * fe.degree + 1),
+                                    QGauss<dim>(fe.degree + 1),
                                     update_values | update_JxW_values |
                                       update_gradients |
                                       update_quadrature_points);
+
   dof_handler.distribute_dofs(fe);
   locally_owned_dofs    = dof_handler.locally_owned_dofs();
   locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
 
   constraints.clear();
+  constraints.reinit(locally_owned_dofs, locally_relevant_dofs);
   constraints.close();
 
   DynamicSparsityPattern dsp(locally_relevant_dofs);
@@ -359,7 +361,7 @@ IonicModel<dim>::setup_problem()
 
   solution_old.reinit(locally_owned_dofs, communicator);
   solution.reinit(locally_owned_dofs, communicator);
-  system_rhs.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
+  system_rhs.reinit(locally_owned_dofs, communicator);
 
   w0_old.reinit(locally_owned_dofs, communicator);
   w0.reinit(locally_owned_dofs, communicator);
@@ -405,6 +407,7 @@ IonicModel<dim>::update_w_and_ion()
 
   // update w from t_n to t_{n+1} on the locally owned DoFs for all w's
   // On top of that, evaluate Iion at DoFs
+  ion_at_dofs.zero_out_ghost_values();
   for (const types::global_dof_index i : locally_owned_dofs)
     {
       // First, update w's
@@ -701,7 +704,7 @@ main(int argc, char *argv[])
     parameters.control.set_tolerance(1e-10);
     parameters.control.set_max_steps(2000);
 
-    parameters.mesh_dir = "../idealized_lv.msh";
+    parameters.mesh_dir                 = "../idealized_lv.msh";
     parameters.fe_degree                = 1;
     parameters.dt                       = 1e-4;
     parameters.final_time               = 1.0;
