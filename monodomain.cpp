@@ -185,9 +185,6 @@ private:
   solve();
   void
   output_results();
-  void
-  compute_error() const;
-
 
   const MPI_Comm                                 communicator;
   parallel::fullydistributed::Triangulation<dim> tria;
@@ -203,9 +200,7 @@ private:
   TrilinosWrappers::SparseMatrix                 laplace_matrix;
   TrilinosWrappers::SparseMatrix                 system_matrix;
   LinearAlgebra::distributed::Vector<double>     system_rhs;
-  std::unique_ptr<Function<dim>>                 rhs_function;
   std::unique_ptr<Function<dim>>                 Iext;
-  std::unique_ptr<Function<dim>>                 analytical_solution;
 
   std::unique_ptr<FEValues<dim>> fe_values;
 
@@ -343,7 +338,7 @@ IonicModel<dim>::setup_problem()
   constraints.close();
 
   DynamicSparsityPattern dsp(locally_relevant_dofs);
-  DoFTools::make_flux_sparsity_pattern(dof_handler, dsp);
+  DoFTools::make_sparsity_pattern(dof_handler, dsp);
   SparsityTools::distribute_sparsity_pattern(dsp,
                                              locally_owned_dofs,
                                              communicator,
@@ -359,9 +354,9 @@ IonicModel<dim>::setup_problem()
                        dsp,
                        communicator);
 
-  solution_old.reinit(locally_owned_dofs, communicator);
-  solution.reinit(locally_owned_dofs, communicator);
-  system_rhs.reinit(locally_owned_dofs, communicator);
+  solution_old.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
+  solution.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
+  system_rhs.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
 
   w0_old.reinit(locally_owned_dofs, communicator);
   w0.reinit(locally_owned_dofs, communicator);
