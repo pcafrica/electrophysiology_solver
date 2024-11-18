@@ -8,7 +8,7 @@
 
 #include <deal.II/dofs/dof_tools.h>
 
-#include <deal.II/fe/fe_dgq.h>
+#include <deal.II/fe/fe_q.h>
 #include <deal.II/fe/fe_values.h>
 #include <deal.II/fe/mapping.h>
 
@@ -83,12 +83,8 @@ struct ModelParameters
   double       k2                       = 65.0;
   double       k3                       = 2.0994;
   double       kso                      = 2.0;
-  bool         use_amg                  = false;
 
   std::string mesh_dir = "../../meshes/idealized_lv.msh";
-
-  // eventually compute activation map at each time step
-  bool compute_activation_map = false;
 };
 
 
@@ -196,7 +192,7 @@ private:
   const MPI_Comm                                 communicator;
   parallel::fullydistributed::Triangulation<dim> tria;
   MappingQ<dim>                                  mapping;
-  FE_DGQ<dim>                                    fe;
+  FE_Q<dim>                                      fe;
   DoFHandler<dim>                                dof_handler;
   ConditionalOStream                             pcout;
   TimerOutput                                    computing_timer;
@@ -214,6 +210,7 @@ private:
   std::unique_ptr<FEValues<dim>> fe_values;
 
   IndexSet locally_owned_dofs;
+  IndexSet locally_relevant_dofs;
 
   LinearAlgebra::distributed::Vector<double> solution_old;
   LinearAlgebra::distributed::Vector<double> solution;
@@ -226,10 +223,6 @@ private:
   LinearAlgebra::distributed::Vector<double> w2;
 
   LinearAlgebra::distributed::Vector<double> ion_at_dofs;
-
-  // Activation map
-  using VectorType = LinearAlgebra::distributed::Vector<double>;
-  LinearAlgebra::distributed::Vector<double> activation_map;
 
   //   Time stepping parameters
   double       time;
@@ -341,18 +334,18 @@ IonicModel<dim>::setup_problem()
                                       update_gradients |
                                       update_quadrature_points);
   dof_handler.distribute_dofs(fe);
-  locally_owned_dofs  = dof_handler.locally_owned_dofs();
-  const IndexSet dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
+  locally_owned_dofs    = dof_handler.locally_owned_dofs();
+  locally_relevant_dofs = DoFTools::extract_locally_relevant_dofs(dof_handler);
 
   constraints.clear();
   constraints.close();
 
-  DynamicSparsityPattern dsp(dofs);
+  DynamicSparsityPattern dsp(locally_relevant_dofs);
   DoFTools::make_flux_sparsity_pattern(dof_handler, dsp);
   SparsityTools::distribute_sparsity_pattern(dsp,
-                                             dof_handler.locally_owned_dofs(),
+                                             locally_owned_dofs,
                                              communicator,
-                                             dofs);
+                                             locally_relevant_dofs);
 
   mass_matrix.reinit(locally_owned_dofs, locally_owned_dofs, dsp, communicator);
   laplace_matrix.reinit(locally_owned_dofs,
@@ -366,7 +359,7 @@ IonicModel<dim>::setup_problem()
 
   solution_old.reinit(locally_owned_dofs, communicator);
   solution.reinit(locally_owned_dofs, communicator);
-  system_rhs.reinit(locally_owned_dofs, communicator);
+  system_rhs.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
 
   w0_old.reinit(locally_owned_dofs, communicator);
   w0.reinit(locally_owned_dofs, communicator);
@@ -375,9 +368,7 @@ IonicModel<dim>::setup_problem()
   w2_old.reinit(locally_owned_dofs, communicator);
   w2.reinit(locally_owned_dofs, communicator);
 
-  ion_at_dofs.reinit(locally_owned_dofs, communicator);
-
-  activation_map.reinit(locally_owned_dofs, communicator);
+  ion_at_dofs.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
 
   Iext = std::make_unique<AppliedCurrent<dim>>(end_time_current);
 }
@@ -430,6 +421,7 @@ IonicModel<dim>::update_w_and_ion()
       // Evaluate ion at u_n, w_{n+1}
       ion_at_dofs[i] = Iion(solution_old[i], {w0[i], w1[i], w2[i]});
     }
+  ion_at_dofs.update_ghost_values();
 }
 
 
@@ -504,7 +496,6 @@ IonicModel<dim>::assemble_time_terms()
 
   const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
   Vector<double>     cell_rhs(dofs_per_cell);
-  Vector<double>     cell_ion(dofs_per_cell);
 
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
@@ -514,7 +505,6 @@ IonicModel<dim>::assemble_time_terms()
       if (cell->is_locally_owned())
         {
           cell_rhs = 0;
-          cell_ion = 0;
 
           fe_values->reinit(cell);
 
@@ -557,6 +547,8 @@ IonicModel<dim>::solve()
   TimerOutput::Scope t(computing_timer, "Solve");
 
   solver.solve(system_matrix, solution, system_rhs, amg_preconditioner);
+
+  constraints.distribute(solution);
 
   pcout << "\tNumber of outer iterations: " << param.control.last_step()
         << std::endl;
@@ -646,7 +638,7 @@ IonicModel<dim>::run()
         << std::endl;
 
   solution_old = -84e-3;
-  solution = solution_old;
+  solution     = solution_old;
 
   w0_old = 1.;
   w0     = w0_old;
@@ -664,8 +656,8 @@ IonicModel<dim>::run()
   unsigned int iter_count = 0;
 
   // M/dt + A
-  system_matrix.copy_from(mass_matrix);  
-  system_matrix.add(+1, laplace_matrix); 
+  system_matrix.copy_from(mass_matrix);
+  system_matrix.add(+1, laplace_matrix);
 
   amg_preconditioner.initialize(system_matrix);
   pcout << "Setup multigrid: done " << std::endl;
@@ -710,10 +702,9 @@ main(int argc, char *argv[])
     parameters.control.set_max_steps(2000);
 
     parameters.mesh_dir = "../idealized_lv.msh";
-    // parameters.mesh_dir           = "../realistic_lv.msh";
     parameters.fe_degree                = 1;
     parameters.dt                       = 1e-4;
-    parameters.final_time               = 0.4;
+    parameters.final_time               = 1.0;
     parameters.applied_current_duration = 3e-3;
 
     IonicModel<3> problem(parameters);
