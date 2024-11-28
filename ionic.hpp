@@ -3,17 +3,10 @@
 #include "common.hpp"
 #include "utils.hpp"
 
-class BuenoOrovio
+class BuenoOrovio : public Common
 {
 public:
-  BuenoOrovio()
-    : communicator(MPI_COMM_WORLD)
-    , pcout(std::cout, Utilities::MPI::this_mpi_process(communicator) == 0)
-    , computing_timer(communicator,
-                      pcout,
-                      TimerOutput::summary,
-                      TimerOutput::wall_times)
-  {}
+  BuenoOrovio() = default;
 
   void
   setup(const IndexSet &locally_owned_dofs,
@@ -29,7 +22,7 @@ public:
   w_inf(const double u);
 
   double
-  Iion(const double u_old, const std::vector<double> &w) const;
+  Iion_0d(const double u_old, const std::vector<double> &w) const;
 
   void
   solve(const IndexSet                                   &locally_owned_dofs,
@@ -37,10 +30,6 @@ public:
         const double                                     &dt);
 
   // private:
-  const MPI_Comm     communicator;
-  ConditionalOStream pcout;
-  TimerOutput        computing_timer;
-
   LinearAlgebra::distributed::Vector<double> w0_old;
   LinearAlgebra::distributed::Vector<double> w0;
   LinearAlgebra::distributed::Vector<double> w1_old;
@@ -48,7 +37,7 @@ public:
   LinearAlgebra::distributed::Vector<double> w2_old;
   LinearAlgebra::distributed::Vector<double> w2;
 
-  LinearAlgebra::distributed::Vector<double> ion_at_dofs;
+  LinearAlgebra::distributed::Vector<double> Iion;
 
   double V1         = 0.3;
   double V1m        = 0.015;
@@ -83,14 +72,14 @@ void
 BuenoOrovio::setup(const IndexSet &locally_owned_dofs,
                    const IndexSet &locally_relevant_dofs)
 {
-  TimerOutput::Scope t(computing_timer, "Setup ionic model");
+  TimerOutput::Scope t(timer, "Setup ionic model");
 
-  w0_old.reinit(locally_owned_dofs, communicator);
-  w0.reinit(locally_owned_dofs, communicator);
-  w1_old.reinit(locally_owned_dofs, communicator);
-  w1.reinit(locally_owned_dofs, communicator);
-  w2_old.reinit(locally_owned_dofs, communicator);
-  w2.reinit(locally_owned_dofs, communicator);
+  w0_old.reinit(locally_owned_dofs, mpi_comm);
+  w0.reinit(locally_owned_dofs, mpi_comm);
+  w1_old.reinit(locally_owned_dofs, mpi_comm);
+  w1.reinit(locally_owned_dofs, mpi_comm);
+  w2_old.reinit(locally_owned_dofs, mpi_comm);
+  w2.reinit(locally_owned_dofs, mpi_comm);
 
   w0_old = 1.;
   w0     = w0_old;
@@ -101,8 +90,8 @@ BuenoOrovio::setup(const IndexSet &locally_owned_dofs,
   w2_old = 0;
   w2     = w2_old;
 
-  ion_at_dofs.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
-  ion_at_dofs = 0;
+  Iion.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
+  Iion = 0;
 }
 
 
@@ -150,9 +139,9 @@ BuenoOrovio::w_inf(const double u)
 }
 
 double
-BuenoOrovio::Iion(const double u_old, const std::vector<double> &w) const
+BuenoOrovio::Iion_0d(const double u_old, const std::vector<double> &w) const
 {
-  double Iion_val =
+  const double Iion_val =
     utils::heaviside_sharp(u_old, V1) * (u_old - V1) * (Vhat - u_old) * w[0] /
       taufi -
     (1.0 - utils::heaviside_sharp(u_old, V2)) * (u_old - 0.) /
@@ -161,9 +150,7 @@ BuenoOrovio::Iion(const double u_old, const std::vector<double> &w) const
       (utils::heaviside(u_old, Vso, kso) * (tausopp - tausop) + tausop) +
     utils::heaviside_sharp(u_old, V2) * w[1] * w[2] / tausi;
 
-  Iion_val = -Iion_val;
-
-  return Iion_val;
+  return -Iion_val;
 }
 
 
@@ -174,11 +161,11 @@ BuenoOrovio::solve(
   const LinearAlgebra::distributed::Vector<double> &solution_old,
   const double                                     &dt)
 {
-  TimerOutput::Scope t(computing_timer, "Update w and ion at DoFs");
+  TimerOutput::Scope t(timer, "Update w and ion at DoFs");
 
   // update w from t_n to t_{n+1} on the locally owned DoFs for all w's
   // On top of that, evaluate Iion at DoFs
-  ion_at_dofs.zero_out_ghost_values();
+  Iion.zero_out_ghost_values();
   for (const types::global_dof_index i : locally_owned_dofs)
     {
       // First, update w's
@@ -193,9 +180,9 @@ BuenoOrovio::solve(
       w2[i] = w2_old[i] + dt * ((b[2] - a[2]) * w2_old[i] + a[2] * w_infs[2]);
 
       // Evaluate ion at u_n, w_{n+1}
-      ion_at_dofs[i] = Iion(solution_old[i], {w0[i], w1[i], w2[i]});
+      Iion[i] = Iion_0d(solution_old[i], {w0[i], w1[i], w2[i]});
     }
-  ion_at_dofs.update_ghost_values();
+  Iion.update_ghost_values();
 
   w0_old = w0;
   w1_old = w1;

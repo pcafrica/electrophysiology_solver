@@ -48,8 +48,14 @@ struct ModelParameters
 
 
 
-class Monodomain
+class Monodomain : public Common
 {
+public:
+  Monodomain(const ModelParameters &parameters);
+
+  void
+  run();
+
 private:
   void
   setup();
@@ -64,17 +70,14 @@ private:
   void
   output_results();
 
-  const MPI_Comm                                 communicator;
   parallel::fullydistributed::Triangulation<dim> tria;
   MappingQ<dim>                                  mapping;
   FE_Q<dim>                                      fe;
   DoFHandler<dim>                                dof_handler;
-  ConditionalOStream                             pcout;
-  TimerOutput                                    computing_timer;
   SparsityPattern                                sparsity;
   AffineConstraints<double>                      constraints;
   TrilinosWrappers::PreconditionAMG              amg_preconditioner;
-  TrilinosWrappers::SparseMatrix                 mass_matrix;
+  TrilinosWrappers::SparseMatrix                 mass_matrix_dt;
   TrilinosWrappers::SparseMatrix                 laplace_matrix;
   TrilinosWrappers::SparseMatrix                 system_matrix;
   LinearAlgebra::distributed::Vector<double>     system_rhs;
@@ -91,8 +94,8 @@ private:
   //   Time stepping parameters
   double       time;
   const double dt;
-  const double end_time;
-  const double end_time_current; // final time external application
+  const double time_end;
+  const double applied_current_duration; // final time external application
 
   unsigned int iter_count;
 
@@ -101,30 +104,18 @@ private:
   const ModelParameters &param;
 
   BuenoOrovio ionic_model;
-
-public:
-  Monodomain(const ModelParameters &parameters);
-
-  void
-  run();
 };
 
 
 
 Monodomain::Monodomain(const ModelParameters &parameters)
-  : communicator(MPI_COMM_WORLD)
-  , tria(communicator)
+  : tria(mpi_comm)
   , mapping(1)
   , fe(parameters.fe_degree)
   , dof_handler(tria)
-  , pcout(std::cout, Utilities::MPI::this_mpi_process(communicator) == 0)
-  , computing_timer(communicator,
-                    pcout,
-                    TimerOutput::summary,
-                    TimerOutput::wall_times)
   , dt(parameters.dt)
-  , end_time(parameters.final_time)
-  , end_time_current(parameters.applied_current_duration)
+  , time_end(parameters.final_time)
+  , applied_current_duration(parameters.applied_current_duration)
   , solver(const_cast<SolverControl &>(parameters.control))
   , param(parameters)
 {
@@ -137,7 +128,7 @@ Monodomain::Monodomain(const ModelParameters &parameters)
 void
 Monodomain::setup()
 {
-  TimerOutput::Scope t(computing_timer, "Setup monodomain");
+  TimerOutput::Scope t(timer, "Setup monodomain");
 
   fe_values =
     std::make_unique<FEValues<dim>>(mapping,
@@ -159,24 +150,18 @@ Monodomain::setup()
   DoFTools::make_sparsity_pattern(dof_handler, dsp);
   SparsityTools::distribute_sparsity_pattern(dsp,
                                              locally_owned_dofs,
-                                             communicator,
+                                             mpi_comm,
                                              locally_relevant_dofs);
 
-  mass_matrix.reinit(locally_owned_dofs, locally_owned_dofs, dsp, communicator);
-  laplace_matrix.reinit(locally_owned_dofs,
-                        locally_owned_dofs,
-                        dsp,
-                        communicator);
-  system_matrix.reinit(locally_owned_dofs,
-                       locally_owned_dofs,
-                       dsp,
-                       communicator);
+  mass_matrix_dt.reinit(locally_owned_dofs, locally_owned_dofs, dsp, mpi_comm);
+  laplace_matrix.reinit(locally_owned_dofs, locally_owned_dofs, dsp, mpi_comm);
+  system_matrix.reinit(locally_owned_dofs, locally_owned_dofs, dsp, mpi_comm);
 
-  solution_old.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
-  solution.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
-  system_rhs.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
+  solution_old.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
+  solution.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
+  system_rhs.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
 
-  Iapp = std::make_unique<AppliedCurrent>(end_time_current);
+  Iapp = std::make_unique<AppliedCurrent>(applied_current_duration);
 
   ionic_model.setup(locally_owned_dofs, locally_relevant_dofs);
 }
@@ -188,12 +173,12 @@ Monodomain::setup()
 void
 Monodomain::assemble_time_independent_matrix()
 {
-  TimerOutput::Scope t(computing_timer, "Assemble time independent terms");
+  TimerOutput::Scope t(timer, "Assemble time independent terms");
 
   const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
 
   FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
-  FullMatrix<double> cell_mass_matrix(dofs_per_cell, dofs_per_cell);
+  FullMatrix<double> cell_mass_matrix_dt(dofs_per_cell, dofs_per_cell);
 
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
@@ -203,7 +188,7 @@ Monodomain::assemble_time_independent_matrix()
       if (cell->is_locally_owned())
         {
           cell_matrix      = 0;
-          cell_mass_matrix = 0;
+          cell_mass_matrix_dt = 0;
           fe_values->reinit(cell);
 
           cell->get_dof_indices(local_dof_indices);
@@ -219,7 +204,7 @@ Monodomain::assemble_time_independent_matrix()
                                            fe_values->shape_grad(j, q_index) *
                                            fe_values->JxW(q_index);
 
-                      cell_mass_matrix(i, j) +=
+                      cell_mass_matrix_dt(i, j) +=
                         (1. / dt) * fe_values->shape_value(i, q_index) *
                         fe_values->shape_value(j, q_index) *
                         fe_values->JxW(q_index);
@@ -230,12 +215,12 @@ Monodomain::assemble_time_independent_matrix()
           constraints.distribute_local_to_global(cell_matrix,
                                                  local_dof_indices,
                                                  laplace_matrix);
-          constraints.distribute_local_to_global(cell_mass_matrix,
+          constraints.distribute_local_to_global(cell_mass_matrix_dt,
                                                  local_dof_indices,
-                                                 mass_matrix);
+                                                 mass_matrix_dt);
         }
     }
-  mass_matrix.compress(VectorOperation::add);
+  mass_matrix_dt.compress(VectorOperation::add);
   laplace_matrix.compress(VectorOperation::add);
 }
 
@@ -246,7 +231,7 @@ Monodomain::assemble_time_terms()
 {
   system_rhs = 0;
 
-  TimerOutput::Scope t(computing_timer, "Assemble time dependent terms");
+  TimerOutput::Scope t(timer, "Assemble time dependent terms");
 
   const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
   Vector<double>     cell_rhs(dofs_per_cell);
@@ -269,8 +254,7 @@ Monodomain::assemble_time_terms()
           Iapp->value_list(q_points, applied_currents);
 
           std::vector<double> ion_at_qpoints(n_qpoints);
-          fe_values->get_function_values(ionic_model.ion_at_dofs,
-                                         ion_at_qpoints);
+          fe_values->get_function_values(ionic_model.Iion, ion_at_qpoints);
 
           cell->get_dof_indices(local_dof_indices);
 
@@ -291,6 +275,9 @@ Monodomain::assemble_time_terms()
         }
     }
   system_rhs.compress(VectorOperation::add);
+
+  mass_matrix_dt.vmult_add(system_rhs,
+                        solution_old); // Add to system_rhs (M/dt) * u_n
 }
 
 
@@ -298,7 +285,7 @@ Monodomain::assemble_time_terms()
 void
 Monodomain::solve()
 {
-  TimerOutput::Scope t(computing_timer, "Solve");
+  TimerOutput::Scope t(timer, "Solve");
 
   solver.solve(system_matrix, solution, system_rhs, amg_preconditioner);
 
@@ -313,7 +300,7 @@ Monodomain::solve()
 void
 Monodomain::output_results()
 {
-  TimerOutput::Scope t(computing_timer, "Output results");
+  TimerOutput::Scope t(timer, "Output results");
 
   DataOut<dim> data_out;
   data_out.attach_dof_handler(dof_handler);
@@ -338,9 +325,8 @@ Monodomain::output_results()
 
   const bool export_mesh = (iter_count == 0);
 
-  const std::string basename = "output";
-  const std::string filename_h5 =
-    basename + "_" + std::to_string(time) + ".h5";
+  const std::string basename    = "output";
+  const std::string filename_h5 = basename + "_" + std::to_string(time) + ".h5";
   const std::string filename_xdmf =
     basename + "_" + std::to_string(time) + ".xdmf";
   const std::string filename_mesh = basename + "_" + std::to_string(0) + ".h5";
@@ -350,12 +336,12 @@ Monodomain::output_results()
 
   data_out.write_filtered_data(data_filter);
   data_out.write_hdf5_parallel(
-    data_filter, export_mesh, filename_mesh, filename_h5, communicator);
+    data_filter, export_mesh, filename_mesh, filename_h5, mpi_comm);
 
   std::vector<XDMFEntry> xdmf_entries({data_out.create_xdmf_entry(
-    data_filter, filename_mesh, filename_h5, time, communicator)});
+    data_filter, filename_mesh, filename_h5, time, mpi_comm)});
 
-  data_out.write_xdmf_file(xdmf_entries, filename_xdmf, communicator);
+  data_out.write_xdmf_file(xdmf_entries, filename_xdmf, mpi_comm);
 }
 
 
@@ -375,12 +361,11 @@ Monodomain::run()
     const double scale_factor = 1e-3;
     GridTools::scale(scale_factor, tria_dummy);
 
-    const unsigned int n_ranks = Utilities::MPI::n_mpi_processes(communicator);
-    GridTools::partition_triangulation(n_ranks, tria_dummy);
+    GridTools::partition_triangulation(mpi_size, tria_dummy);
 
     const TriangulationDescription::Description<dim, dim> description =
       TriangulationDescription::Utilities::
-        create_description_from_triangulation(tria_dummy, communicator);
+        create_description_from_triangulation(tria_dummy, mpi_comm);
 
     tria.create_triangulation(description);
   }
@@ -402,22 +387,19 @@ Monodomain::run()
   pcout << "Assembled time independent term: done" << std::endl;
 
   // M/dt + A
-  system_matrix.copy_from(mass_matrix);
+  system_matrix.copy_from(mass_matrix_dt);
   system_matrix.add(+1, laplace_matrix);
 
   amg_preconditioner.initialize(system_matrix);
   pcout << "Setup multigrid: done " << std::endl;
 
-  while (time <= end_time)
+  while (time <= time_end)
     {
       time += dt;
       Iapp->set_time(time);
 
       ionic_model.solve(locally_owned_dofs, solution_old, dt);
       assemble_time_terms();
-
-      mass_matrix.vmult_add(system_rhs,
-                            solution_old); // Add to system_rhs (M/dt) * u_n
 
       solve();
       pcout << "Solved at t = " << time << std::endl;
