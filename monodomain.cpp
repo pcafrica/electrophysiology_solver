@@ -1,7 +1,4 @@
-#include <deal.II/base/config.h>
-
 #include <deal.II/base/conditional_ostream.h>
-#include <deal.II/base/function.h>
 #include <deal.II/base/timer.h>
 
 #include <deal.II/distributed/fully_distributed_tria.h>
@@ -26,23 +23,12 @@
 #include <cmath>
 #include <fstream>
 
+#include "applied_current.hpp"
+#include "common.hpp"
+#include "ionic.hpp"
+
 using namespace dealii;
 
-
-namespace utils
-{
-  double
-  heaviside_sharp(const double &x, const double &x0)
-  {
-    return (x > x0);
-  }
-
-  double
-  heaviside(const double &x, const double &x0, const double &k)
-  {
-    return (0.5 * (1 + std::tanh(k * (x - x0))));
-  }
-} // namespace utils
 
 // Model parameters for Bueno-Orovio
 struct ModelParameters
@@ -56,131 +42,23 @@ struct ModelParameters
   double       chi                      = 1;
   double       Cm                       = 1.;
   double       sigma                    = 1e-4;
-  double       V1                       = 0.3;
-  double       V1m                      = 0.015;
-  double       V2                       = 0.015;
-  double       V2m                      = 0.03;
-  double       V3                       = 0.9087;
-  double       Vhat                     = 1.58;
-  double       Vo                       = 0.006;
-  double       Vso                      = 0.65;
-  double       tauop                    = 6e-3;
-  double       tauopp                   = 6e-3;
-  double       tausop                   = 43e-3;
-  double       tausopp                  = 0.2e-3;
-  double       tausi                    = 2.8723e-3;
-  double       taufi                    = 0.11e-3;
-  double       tau1plus                 = 1.4506e-3;
-  double       tau2plus                 = 0.28;
-  double       tau2inf                  = 0.07;
-  double       tau1p                    = 0.06;
-  double       tau1pp                   = 1.15;
-  double       tau2p                    = 0.07;
-  double       tau2pp                   = 0.02;
-  double       tau3p                    = 2.7342e-3;
-  double       tau3pp                   = 0.003;
-  double       w_star_inf               = 0.94;
-  double       k2                       = 65.0;
-  double       k3                       = 2.0994;
-  double       kso                      = 2.0;
 
   std::string mesh_dir = "../../meshes/idealized_lv.msh";
 };
 
 
 
-template <int dim>
-class AppliedCurrent : public Function<dim>
-{
-public:
-  AppliedCurrent(const double applied_current_duration)
-    : Function<dim>()
-    , p1{-0.015598, -0.0173368, 0.0307704}
-    , p2{0.0264292, -0.0043322, 0.0187656}
-    , p3{0.00155326, 0.0252701, 0.0248006}
-  {
-    t_end_current = applied_current_duration;
-    p.push_back(p1);
-    p.push_back(p2);
-    p.push_back(p3);
-  }
-
-  virtual double
-  value(const Point<dim> &p, const unsigned int component = 0) const override;
-
-  virtual void
-  value_list(const std::vector<Point<dim>> &points,
-             std::vector<double>           &values,
-             const unsigned int /*component*/) const override;
-
-private:
-  double                  t_end_current;
-  std::vector<Point<dim>> p;
-  Point<dim>              p1;
-  Point<dim>              p2;
-  Point<dim>              p3;
-};
-
-
-
-template <int dim>
-void
-AppliedCurrent<dim>::value_list(const std::vector<Point<dim>> &points,
-                                std::vector<double>           &values,
-                                const unsigned int /*component*/) const
-{
-  for (unsigned int i = 0; i < values.size(); ++i)
-    values[i] = this->value(points[i]);
-}
-
-template <int dim>
-double
-AppliedCurrent<dim>::value(const Point<dim> &point,
-                           const unsigned int /*component*/) const
-{
-  const double t = this->get_time();
-
-  static constexpr double TOL = 3e-3;
-
-  if ((p1.distance(point) < TOL || p2.distance(point) < TOL ||
-       p3.distance(point) < TOL) &&
-      (t >= 0 && t <= t_end_current))
-    {
-      return 300;
-    }
-
-  return 0;
-}
-
-
-template <int dim>
-class IonicModel
+class Monodomain
 {
 private:
   void
-  setup_problem();
+  setup();
 
   void
   assemble_time_independent_matrix();
 
-  std::array<double, 3>
-  alpha(const double u);
-
-  std::array<double, 3>
-  beta(const double u);
-
-  std::array<double, 3>
-  w_inf(const double u);
-
-  double
-  Iion(const double u_old, const std::vector<double> &w) const;
-
   void
   assemble_time_terms();
-  void
-  update_w_and_ion();
-  void
-  solve_w();
   void
   solve();
   void
@@ -200,7 +78,7 @@ private:
   TrilinosWrappers::SparseMatrix                 laplace_matrix;
   TrilinosWrappers::SparseMatrix                 system_matrix;
   LinearAlgebra::distributed::Vector<double>     system_rhs;
-  std::unique_ptr<Function<dim>>                 Iext;
+  std::unique_ptr<Function<dim>>                 Iapp;
 
   std::unique_ptr<FEValues<dim>> fe_values;
 
@@ -210,26 +88,22 @@ private:
   LinearAlgebra::distributed::Vector<double> solution_old;
   LinearAlgebra::distributed::Vector<double> solution;
 
-  LinearAlgebra::distributed::Vector<double> w0_old;
-  LinearAlgebra::distributed::Vector<double> w0;
-  LinearAlgebra::distributed::Vector<double> w1_old;
-  LinearAlgebra::distributed::Vector<double> w1;
-  LinearAlgebra::distributed::Vector<double> w2_old;
-  LinearAlgebra::distributed::Vector<double> w2;
-
-  LinearAlgebra::distributed::Vector<double> ion_at_dofs;
-
   //   Time stepping parameters
   double       time;
   const double dt;
   const double end_time;
   const double end_time_current; // final time external application
 
+  unsigned int iter_count;
+
   SolverCG<LinearAlgebra::distributed::Vector<double>> solver;
-  const ModelParameters                               &param;
+
+  const ModelParameters &param;
+
+  BuenoOrovio ionic_model;
 
 public:
-  IonicModel(const ModelParameters &parameters);
+  Monodomain(const ModelParameters &parameters);
 
   void
   run();
@@ -237,8 +111,7 @@ public:
 
 
 
-template <int dim>
-IonicModel<dim>::IonicModel(const ModelParameters &parameters)
+Monodomain::Monodomain(const ModelParameters &parameters)
   : communicator(MPI_COMM_WORLD)
   , tria(communicator)
   , mapping(1)
@@ -261,65 +134,10 @@ IonicModel<dim>::IonicModel(const ModelParameters &parameters)
 
 
 
-template <int dim>
-std::array<double, 3>
-IonicModel<dim>::alpha(const double u)
-{
-  std::array<double, 3> a;
-
-  a[0] = (1.0 - utils::heaviside_sharp(u, param.V1)) /
-         (utils::heaviside_sharp(u, param.V1m) * (param.tau1pp - param.tau1p) +
-          param.tau1p);
-  a[1] =
-    (1.0 - utils::heaviside_sharp(u, param.V2)) /
-    (utils::heaviside(u, param.V2m, param.k2) * (param.tau2pp - param.tau2p) +
-     param.tau2p);
-  a[2] =
-    1.0 / (utils::heaviside_sharp(u, param.V2) * (param.tau3pp - param.tau3p) +
-           param.tau3p);
-
-  return a;
-}
-
-
-
-template <int dim>
-std::array<double, 3>
-IonicModel<dim>::beta(const double u)
-{
-  std::array<double, 3> b;
-
-  b[0] = -utils::heaviside_sharp(u, param.V1) / param.tau1plus;
-  b[1] = -utils::heaviside_sharp(u, param.V2) / param.tau2plus;
-  b[2] = 0;
-
-  return b;
-}
-
-
-
-template <int dim>
-std::array<double, 3>
-IonicModel<dim>::w_inf(const double u)
-{
-  std::array<double, 3> wi;
-
-  wi[0] = 1.0 - utils::heaviside_sharp(u, param.V1m);
-  wi[1] = utils::heaviside_sharp(u, param.Vo) *
-            (param.w_star_inf - 1.0 + u / param.tau2inf) +
-          1.0 - u / param.tau2inf;
-  wi[2] = utils::heaviside(u, param.V3, param.k3);
-
-  return wi;
-}
-
-
-
-template <int dim>
 void
-IonicModel<dim>::setup_problem()
+Monodomain::setup()
 {
-  TimerOutput::Scope t(computing_timer, "Setup DoFs");
+  TimerOutput::Scope t(computing_timer, "Setup monodomain");
 
   fe_values =
     std::make_unique<FEValues<dim>>(mapping,
@@ -358,78 +176,17 @@ IonicModel<dim>::setup_problem()
   solution.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
   system_rhs.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
 
-  w0_old.reinit(locally_owned_dofs, communicator);
-  w0.reinit(locally_owned_dofs, communicator);
-  w1_old.reinit(locally_owned_dofs, communicator);
-  w1.reinit(locally_owned_dofs, communicator);
-  w2_old.reinit(locally_owned_dofs, communicator);
-  w2.reinit(locally_owned_dofs, communicator);
+  Iapp = std::make_unique<AppliedCurrent>(end_time_current);
 
-  ion_at_dofs.reinit(locally_owned_dofs, locally_relevant_dofs, communicator);
-
-  Iext = std::make_unique<AppliedCurrent<dim>>(end_time_current);
+  ionic_model.setup(locally_owned_dofs, locally_relevant_dofs);
 }
-
-
-template <int dim>
-double
-IonicModel<dim>::Iion(const double u_old, const std::vector<double> &w) const
-{
-  double Iion_val =
-    utils::heaviside_sharp(u_old, param.V1) * (u_old - param.V1) *
-      (param.Vhat - u_old) * w[0] / param.taufi -
-    (1.0 - utils::heaviside_sharp(u_old, param.V2)) * (u_old - 0.) /
-      (utils::heaviside_sharp(u_old, param.Vo) * (param.tauopp - param.tauop) +
-       param.tauop) -
-    utils::heaviside_sharp(u_old, param.V2) /
-      (utils::heaviside(u_old, param.Vso, param.kso) *
-         (param.tausopp - param.tausop) +
-       param.tausop) +
-    utils::heaviside_sharp(u_old, param.V2) * w[1] * w[2] / param.tausi;
-
-  Iion_val = -Iion_val;
-
-  return Iion_val;
-}
-
-
-
-template <int dim>
-void
-IonicModel<dim>::update_w_and_ion()
-{
-  TimerOutput::Scope t(computing_timer, "Update w and ion at DoFs");
-
-  // update w from t_n to t_{n+1} on the locally owned DoFs for all w's
-  // On top of that, evaluate Iion at DoFs
-  ion_at_dofs.zero_out_ghost_values();
-  for (const types::global_dof_index i : locally_owned_dofs)
-    {
-      // First, update w's
-      std::array<double, 3> a      = alpha(solution_old[i]);
-      std::array<double, 3> b      = beta(solution_old[i]);
-      std::array<double, 3> w_infs = w_inf(solution_old[i]);
-
-      w0[i] = w0_old[i] + dt * ((b[0] - a[0]) * w0_old[i] + a[0] * w_infs[0]);
-
-      w1[i] = w1_old[i] + dt * ((b[1] - a[1]) * w1_old[i] + a[1] * w_infs[1]);
-
-      w2[i] = w2_old[i] + dt * ((b[2] - a[2]) * w2_old[i] + a[2] * w_infs[2]);
-
-      // Evaluate ion at u_n, w_{n+1}
-      ion_at_dofs[i] = Iion(solution_old[i], {w0[i], w1[i], w2[i]});
-    }
-  ion_at_dofs.update_ghost_values();
-}
-
 
 
 /*
  * Assemble the time independent block chi*c*M/dt + A
  */
-template <int dim>
 void
-IonicModel<dim>::assemble_time_independent_matrix()
+Monodomain::assemble_time_independent_matrix()
 {
   TimerOutput::Scope t(computing_timer, "Assemble time independent terms");
 
@@ -484,9 +241,8 @@ IonicModel<dim>::assemble_time_independent_matrix()
 
 
 
-template <int dim>
 void
-IonicModel<dim>::assemble_time_terms()
+Monodomain::assemble_time_terms()
 {
   system_rhs = 0;
 
@@ -510,10 +266,11 @@ IonicModel<dim>::assemble_time_terms()
           const unsigned int n_qpoints = q_points.size();
 
           std::vector<double> applied_currents(n_qpoints);
-          Iext->value_list(q_points, applied_currents);
+          Iapp->value_list(q_points, applied_currents);
 
           std::vector<double> ion_at_qpoints(n_qpoints);
-          fe_values->get_function_values(ion_at_dofs, ion_at_qpoints);
+          fe_values->get_function_values(ionic_model.ion_at_dofs,
+                                         ion_at_qpoints);
 
           cell->get_dof_indices(local_dof_indices);
 
@@ -538,9 +295,8 @@ IonicModel<dim>::assemble_time_terms()
 
 
 
-template <int dim>
 void
-IonicModel<dim>::solve()
+Monodomain::solve()
 {
   TimerOutput::Scope t(computing_timer, "Solve");
 
@@ -554,57 +310,58 @@ IonicModel<dim>::solve()
 
 
 
-template <int dim>
 void
-IonicModel<dim>::output_results()
+Monodomain::output_results()
 {
   TimerOutput::Scope t(computing_timer, "Output results");
 
   DataOut<dim> data_out;
   data_out.attach_dof_handler(dof_handler);
+
+  //
   data_out.add_data_vector(solution,
                            "transmembrane_potential",
                            DataOut<dim>::type_dof_data);
 
-  data_out.add_data_vector(w0, "gating_variable", DataOut<dim>::type_dof_data);
+  //
+  data_out.add_data_vector(ionic_model.w0, "w0", DataOut<dim>::type_dof_data);
+  data_out.add_data_vector(ionic_model.w1, "w1", DataOut<dim>::type_dof_data);
+  data_out.add_data_vector(ionic_model.w2, "w2", DataOut<dim>::type_dof_data);
 
+  //
   Vector<float> subdomain(tria.n_active_cells());
-
   for (unsigned int i = 0; i < subdomain.size(); ++i)
     subdomain(i) = tria.locally_owned_subdomain();
-
   data_out.add_data_vector(subdomain, "subdomain");
 
   data_out.build_patches(mapping);
 
-  const std::string filename =
-    ("output_time_" + std::to_string(time) +
-     Utilities::int_to_string(tria.locally_owned_subdomain(), 4));
+  const bool export_mesh = (iter_count == 0);
 
-  std::ofstream output((filename + ".vtu").c_str());
-  data_out.write_vtu(output);
+  const std::string basename = "output";
+  const std::string filename_h5 =
+    basename + "_" + std::to_string(time) + ".h5";
+  const std::string filename_xdmf =
+    basename + "_" + std::to_string(time) + ".xdmf";
+  const std::string filename_mesh = basename + "_" + std::to_string(0) + ".h5";
 
-  if (Utilities::MPI::this_mpi_process(communicator) == 0)
-    {
-      std::vector<std::string> filenames;
-      for (unsigned int i = 0;
-           i < Utilities::MPI::n_mpi_processes(communicator);
-           i++)
-        {
-          filenames.push_back("output_time_" + std::to_string(time) +
-                              Utilities::int_to_string(i, 4) + ".vtu");
-        }
-      std::ofstream master_output("output_time_" + std::to_string(time) +
-                                  ".pvtu");
-      data_out.write_pvtu_record(master_output, filenames);
-    }
+  DataOutBase::DataOutFilter data_filter(
+    DataOutBase::DataOutFilterFlags(true, true));
+
+  data_out.write_filtered_data(data_filter);
+  data_out.write_hdf5_parallel(
+    data_filter, export_mesh, filename_mesh, filename_h5, communicator);
+
+  std::vector<XDMFEntry> xdmf_entries({data_out.create_xdmf_entry(
+    data_filter, filename_mesh, filename_h5, time, communicator)});
+
+  data_out.write_xdmf_file(xdmf_entries, filename_xdmf, communicator);
 }
 
 
 
-template <int dim>
 void
-IonicModel<dim>::run()
+Monodomain::run()
 {
   // Create mesh
   {
@@ -631,27 +388,18 @@ IonicModel<dim>::run()
   pcout << "   Number of active cells:       " << tria.n_global_active_cells()
         << std::endl;
 
-  setup_problem();
+  setup();
   pcout << "   Number of degrees of freedom: " << dof_handler.n_dofs()
         << std::endl;
 
   solution_old = -84e-3;
   solution     = solution_old;
 
-  w0_old = 1.;
-  w0     = w0_old;
-
-  w1_old = 1.;
-  w1     = w1_old;
-
-  w2_old = 0;
-  w2     = w2_old;
+  iter_count = 0;
   output_results();
 
   assemble_time_independent_matrix();
   pcout << "Assembled time independent term: done" << std::endl;
-
-  unsigned int iter_count = 0;
 
   // M/dt + A
   system_matrix.copy_from(mass_matrix);
@@ -663,9 +411,9 @@ IonicModel<dim>::run()
   while (time <= end_time)
     {
       time += dt;
-      Iext->set_time(time);
+      Iapp->set_time(time);
 
-      update_w_and_ion();
+      ionic_model.solve(locally_owned_dofs, solution_old, dt);
       assemble_time_terms();
 
       mass_matrix.vmult_add(system_rhs,
@@ -680,9 +428,6 @@ IonicModel<dim>::run()
 
       // update solutions
       solution_old = solution;
-      w0_old       = w0;
-      w1_old       = w1;
-      w2_old       = w2;
     }
   pcout << std::endl;
 }
@@ -705,7 +450,7 @@ main(int argc, char *argv[])
     parameters.final_time               = 1.0;
     parameters.applied_current_duration = 3e-3;
 
-    IonicModel<3> problem(parameters);
+    Monodomain problem(parameters);
     problem.run();
   }
   return 0;

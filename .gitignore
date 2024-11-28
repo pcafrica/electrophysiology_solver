@@ -1,3 +1,9 @@
+*~
+build*
+compile_commands.json*
+
+*.msh
+
 # Prerequisites
 *.d
 
