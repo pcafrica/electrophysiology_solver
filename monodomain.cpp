@@ -36,14 +36,12 @@ struct ModelParameters
   SolverControl control;
 
   unsigned int fe_degree                = 1;
-  double       dt                       = 1e-2;
-  double       final_time               = 1.;
-  double       applied_current_duration = 1.;
-  double       chi                      = 1;
-  double       Cm                       = 1.;
+  double       dt                       = 1e-4;
+  double       final_time               = 0.02;
+  double       applied_current_duration = 3e-3;
   double       sigma                    = 1e-4;
 
-  std::string mesh_dir = "../../meshes/idealized_lv.msh";
+  std::string mesh_dir = "../idealized_lv.msh";
 };
 
 
@@ -97,7 +95,7 @@ private:
   const double time_end;
   const double applied_current_duration; // final time external application
 
-  unsigned int iter_count;
+  unsigned int time_step;
 
   SolverCG<LinearAlgebra::distributed::Vector<double>> solver;
 
@@ -168,7 +166,7 @@ Monodomain::setup()
 
 
 /*
- * Assemble the time independent block chi*c*M/dt + A
+ * Assemble the time independent block M/dt + A
  */
 void
 Monodomain::assemble_time_independent_matrix()
@@ -187,7 +185,7 @@ Monodomain::assemble_time_independent_matrix()
     {
       if (cell->is_locally_owned())
         {
-          cell_matrix      = 0;
+          cell_matrix         = 0;
           cell_mass_matrix_dt = 0;
           fe_values->reinit(cell);
 
@@ -277,7 +275,7 @@ Monodomain::assemble_time_terms()
   system_rhs.compress(VectorOperation::add);
 
   mass_matrix_dt.vmult_add(system_rhs,
-                        solution_old); // Add to system_rhs (M/dt) * u_n
+                           solution_old); // Add to system_rhs (M/dt) * u_n
 }
 
 
@@ -323,7 +321,7 @@ Monodomain::output_results()
 
   data_out.build_patches(mapping);
 
-  const bool export_mesh = (iter_count == 0);
+  const bool export_mesh = (time_step == 0);
 
   const std::string basename    = "output";
   const std::string filename_h5 = basename + "_" + std::to_string(time) + ".h5";
@@ -380,7 +378,7 @@ Monodomain::run()
   solution_old = -84e-3;
   solution     = solution_old;
 
-  iter_count = 0;
+  time_step = 0;
   output_results();
 
   assemble_time_independent_matrix();
@@ -403,9 +401,9 @@ Monodomain::run()
 
       solve();
       pcout << "Solved at t = " << time << std::endl;
-      ++iter_count;
+      ++time_step;
 
-      if ((iter_count % 10 == 0) || time < param.applied_current_duration)
+      if ((time_step % 10 == 0) || time < param.applied_current_duration)
         output_results();
 
       // update solutions
@@ -425,12 +423,6 @@ main(int argc, char *argv[])
     ModelParameters parameters;
     parameters.control.set_tolerance(1e-10);
     parameters.control.set_max_steps(2000);
-
-    parameters.mesh_dir                 = "../idealized_lv.msh";
-    parameters.fe_degree                = 1;
-    parameters.dt                       = 1e-4;
-    parameters.final_time               = 1.0;
-    parameters.applied_current_duration = 3e-3;
 
     Monodomain problem(parameters);
     problem.run();
