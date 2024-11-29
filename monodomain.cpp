@@ -25,27 +25,10 @@
 
 using namespace dealii;
 
-
-// Model parameters for Bueno-Orovio
-struct ModelParameters
-{
-  SolverControl control;
-
-  unsigned int fe_degree                = 1;
-  double       dt                       = 1e-4;
-  double       final_time               = 0.02;
-  double       applied_current_duration = 3e-3;
-  double       sigma                    = 1e-4;
-
-  std::string mesh_dir = "../idealized_lv.msh";
-};
-
-
-
 class Monodomain : public Common
 {
 public:
-  Monodomain(const ModelParameters &parameters);
+  Monodomain();
 
   void
   run();
@@ -88,34 +71,24 @@ private:
   //   Time stepping parameters
   double       time;
   const double dt;
-  const double time_end;
-  const double applied_current_duration; // final time external application
-
   unsigned int time_step;
-
-  SolverCG<LinearAlgebra::distributed::Vector<double>> solver;
-
-  const ModelParameters &param;
+  const double time_end;
 
   BuenoOrovio ionic_model;
 };
 
 
 
-Monodomain::Monodomain(const ModelParameters &parameters)
+Monodomain::Monodomain()
   : tria(mpi_comm)
   , mapping(1)
-  , fe(parameters.fe_degree)
+  , fe(1)
   , dof_handler(tria)
-  , dt(parameters.dt)
-  , time_end(parameters.final_time)
-  , applied_current_duration(parameters.applied_current_duration)
-  , solver(const_cast<SolverControl &>(parameters.control))
-  , param(parameters)
-{
-  static_assert(dim == 3);
-  time = 0;
-}
+  , time(0)
+  , dt(1e-4)
+  , time_step(0)
+  , time_end(1)
+{}
 
 
 
@@ -155,7 +128,7 @@ Monodomain::setup()
   u.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
   system_rhs.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
 
-  Iapp = std::make_unique<AppliedCurrent>(applied_current_duration);
+  Iapp = std::make_unique<AppliedCurrent>();
 
   ionic_model.setup(locally_owned_dofs, locally_relevant_dofs, dt);
 }
@@ -193,7 +166,7 @@ Monodomain::assemble_time_independent_matrix()
                 {
                   for (unsigned int j = 0; j < dofs_per_cell; ++j)
                     {
-                      cell_matrix(i, j) += param.sigma *
+                      cell_matrix(i, j) += 1e-4 * // sigma
                                            fe_values->shape_grad(i, q_index) *
                                            fe_values->shape_grad(j, q_index) *
                                            fe_values->JxW(q_index);
@@ -223,9 +196,9 @@ Monodomain::assemble_time_independent_matrix()
 void
 Monodomain::assemble_time_terms()
 {
-  system_rhs = 0;
-
   TimerOutput::Scope t(timer, "Assemble time dependent terms");
+
+  system_rhs = 0;
 
   const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
   Vector<double>     cell_rhs(dofs_per_cell);
@@ -281,11 +254,14 @@ Monodomain::solve()
 {
   TimerOutput::Scope t(timer, "Solve");
 
+  SolverControl solver_control(1000, 1e-10);
+
+  SolverCG<LinearAlgebra::distributed::Vector<double>> solver(solver_control);
   solver.solve(system_matrix, u, system_rhs, amg_preconditioner);
 
   constraints.distribute(u);
 
-  pcout << "\tNumber of outer iterations: " << param.control.last_step()
+  pcout << "\tNumber of outer iterations: " << solver_control.last_step()
         << std::endl;
 }
 
@@ -348,11 +324,12 @@ Monodomain::run()
 {
   // Create mesh
   {
+    TimerOutput::Scope t(timer, "Create mesh");
     Triangulation<dim> tria_dummy;
 
     GridIn<dim> grid_in;
     grid_in.attach_triangulation(tria_dummy);
-    std::ifstream mesh_file(param.mesh_dir);
+    std::ifstream mesh_file("../idealized_lv.msh");
     grid_in.read_msh(mesh_file);
 
     const double scale_factor = 1e-3;
@@ -367,28 +344,25 @@ Monodomain::run()
     tria.create_triangulation(description);
   }
 
-  pcout << "   Number of active cells:       " << tria.n_global_active_cells()
+  pcout << "\tNumber of active cells:       " << tria.n_global_active_cells()
         << std::endl;
 
   setup();
-  pcout << "   Number of degrees of freedom: " << dof_handler.n_dofs()
+  pcout << "\tNumber of degrees of freedom: " << dof_handler.n_dofs()
         << std::endl;
 
   u_old = -84e-3;
   u     = u_old;
 
-  time_step = 0;
   output_results();
 
   assemble_time_independent_matrix();
-  pcout << "Assembled time independent term: done" << std::endl;
 
   // M/dt + A
   system_matrix.copy_from(mass_matrix_dt);
   system_matrix.add(+1, laplace_matrix);
 
   amg_preconditioner.initialize(system_matrix);
-  pcout << "Setup multigrid: done " << std::endl;
 
   while (time <= time_end)
     {
@@ -402,10 +376,9 @@ Monodomain::run()
       pcout << "Solved at t = " << time << std::endl;
       ++time_step;
 
-      if ((time_step % 10 == 0) || time < param.applied_current_duration)
+      if ((time_step % 10 == 0))
         output_results();
 
-      // update solutions
       u_old = u;
     }
   pcout << std::endl;
@@ -418,13 +391,8 @@ main(int argc, char *argv[])
 {
   Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
 
-  {
-    ModelParameters parameters;
-    parameters.control.set_tolerance(1e-10);
-    parameters.control.set_max_steps(2000);
+  Monodomain problem;
+  problem.run();
 
-    Monodomain problem(parameters);
-    problem.run();
-  }
   return 0;
 }

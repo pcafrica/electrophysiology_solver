@@ -7,7 +7,7 @@
 class AppliedCurrent : public Function<dim>
 {
 public:
-  AppliedCurrent(const double applied_current_duration);
+  AppliedCurrent();
 
   virtual double
   value(const Point<dim> &p, const unsigned int component = 0) const override;
@@ -18,7 +18,6 @@ public:
              const unsigned int /*component*/) const override;
 
 private:
-  double                  t_end_current;
   std::vector<Point<dim>> p;
   Point<dim>              p1;
   Point<dim>              p2;

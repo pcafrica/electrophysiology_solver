@@ -1,12 +1,11 @@
 #include "applied_current.hpp"
 
-AppliedCurrent::AppliedCurrent(const double applied_current_duration)
+AppliedCurrent::AppliedCurrent()
   : Function<dim>()
   , p1{-0.015598, -0.0173368, 0.0307704}
   , p2{0.0264292, -0.0043322, 0.0187656}
   , p3{0.00155326, 0.0252701, 0.0248006}
 {
-  t_end_current = applied_current_duration;
   p.push_back(p1);
   p.push_back(p2);
   p.push_back(p3);
@@ -31,7 +30,7 @@ AppliedCurrent::value(const Point<dim> &point,
 
   if ((p1.distance(point) < TOL || p2.distance(point) < TOL ||
        p3.distance(point) < TOL) &&
-      (t >= 0 && t <= t_end_current))
+      (t >= 0 && t <= 3e-3))
     {
       return 300;
     }

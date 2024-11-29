@@ -72,6 +72,8 @@ double
 BuenoOrovio::Iion_0d(const double                                   u_old,
                      const std::array<double, BuenoOrovio::N_VARS> &w) const
 {
+  TimerOutput::Scope t(timer, "Compute Iion");
+
   const double Iion_val =
     utils::heaviside_sharp(u_old, V1) * (u_old - V1) * (Vhat - u_old) * w[0] /
       taufi -
@@ -88,6 +90,8 @@ std::array<double, BuenoOrovio::N_VARS>
 BuenoOrovio::solve_0d(const double                                   u_old,
                       const std::array<double, BuenoOrovio::N_VARS> &w) const
 {
+  TimerOutput::Scope t(timer, "Compute w");
+
   std::array<double, N_VARS> w_new;
 
   std::array<double, 3> a      = alpha(u_old);
@@ -105,7 +109,7 @@ BuenoOrovio::solve_0d(const double                                   u_old,
 void
 BuenoOrovio::solve(const LinearAlgebra::distributed::Vector<double> &u_old)
 {
-  TimerOutput::Scope t(timer, "Update w and ion at DoFs");
+  TimerOutput::Scope t(timer, "Update w and Iion at DoFs");
 
   // update w from t_n to t_{n+1} on the locally owned DoFs for all w's
   // On top of that, evaluate Iion at DoFs
