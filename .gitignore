@@ -1,8 +1,13 @@
+# Emacs
 *~
+
 build*
 compile_commands.json*
 
 *.msh
+
+# VS Code
+.vscode/
 
 # Prerequisites
 *.d

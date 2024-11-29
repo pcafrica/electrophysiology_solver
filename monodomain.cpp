@@ -1,6 +1,3 @@
-#include <deal.II/base/conditional_ostream.h>
-#include <deal.II/base/timer.h>
-
 #include <deal.II/distributed/fully_distributed_tria.h>
 
 #include <deal.II/dofs/dof_tools.h>
@@ -12,7 +9,6 @@
 #include <deal.II/grid/grid_in.h>
 #include <deal.II/grid/grid_tools.h>
 
-#include <deal.II/lac/precondition.h>
 #include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/lac/trilinos_precondition.h>
@@ -309,9 +305,12 @@ Monodomain::output_results()
                            DataOut<dim>::type_dof_data);
 
   //
-  data_out.add_data_vector(ionic_model.w0, "w0", DataOut<dim>::type_dof_data);
-  data_out.add_data_vector(ionic_model.w1, "w1", DataOut<dim>::type_dof_data);
-  data_out.add_data_vector(ionic_model.w2, "w2", DataOut<dim>::type_dof_data);
+  for (unsigned int i = 0; i < ionic_model.w.size(); ++i)
+    {
+      data_out.add_data_vector(ionic_model.w[i],
+                               "w" + std::to_string(i),
+                               DataOut<dim>::type_dof_data);
+    }
 
   //
   Vector<float> subdomain(tria.n_active_cells());

@@ -2,9 +2,12 @@
 
 #include <deal.II/base/config.h>
 
-static inline constexpr unsigned int dim = 3;
+#include <deal.II/base/conditional_ostream.h>
+#include <deal.II/base/timer.h>
 
 using namespace dealii;
+
+static inline constexpr unsigned int dim = 3;
 
 class Common
 {
