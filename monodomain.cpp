@@ -82,8 +82,8 @@ private:
   IndexSet locally_owned_dofs;
   IndexSet locally_relevant_dofs;
 
-  LinearAlgebra::distributed::Vector<double> solution_old;
-  LinearAlgebra::distributed::Vector<double> solution;
+  LinearAlgebra::distributed::Vector<double> u_old;
+  LinearAlgebra::distributed::Vector<double> u;
 
   //   Time stepping parameters
   double       time;
@@ -151,13 +151,13 @@ Monodomain::setup()
   laplace_matrix.reinit(locally_owned_dofs, locally_owned_dofs, dsp, mpi_comm);
   system_matrix.reinit(locally_owned_dofs, locally_owned_dofs, dsp, mpi_comm);
 
-  solution_old.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
-  solution.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
+  u_old.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
+  u.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
   system_rhs.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
 
   Iapp = std::make_unique<AppliedCurrent>(applied_current_duration);
 
-  ionic_model.setup(locally_owned_dofs, locally_relevant_dofs);
+  ionic_model.setup(locally_owned_dofs, locally_relevant_dofs, dt);
 }
 
 
@@ -271,7 +271,7 @@ Monodomain::assemble_time_terms()
   system_rhs.compress(VectorOperation::add);
 
   mass_matrix_dt.vmult_add(system_rhs,
-                           solution_old); // Add to system_rhs (M/dt) * u_n
+                           u_old); // Add to system_rhs (M/dt) * u_n
 }
 
 
@@ -281,9 +281,9 @@ Monodomain::solve()
 {
   TimerOutput::Scope t(timer, "Solve");
 
-  solver.solve(system_matrix, solution, system_rhs, amg_preconditioner);
+  solver.solve(system_matrix, u, system_rhs, amg_preconditioner);
 
-  constraints.distribute(solution);
+  constraints.distribute(u);
 
   pcout << "\tNumber of outer iterations: " << param.control.last_step()
         << std::endl;
@@ -300,7 +300,7 @@ Monodomain::output_results()
   data_out.attach_dof_handler(dof_handler);
 
   //
-  data_out.add_data_vector(solution,
+  data_out.add_data_vector(u,
                            "transmembrane_potential",
                            DataOut<dim>::type_dof_data);
 
@@ -374,8 +374,8 @@ Monodomain::run()
   pcout << "   Number of degrees of freedom: " << dof_handler.n_dofs()
         << std::endl;
 
-  solution_old = -84e-3;
-  solution     = solution_old;
+  u_old = -84e-3;
+  u     = u_old;
 
   time_step = 0;
   output_results();
@@ -395,7 +395,7 @@ Monodomain::run()
       time += dt;
       Iapp->set_time(time);
 
-      ionic_model.solve(locally_owned_dofs, solution_old, dt);
+      ionic_model.solve(u_old);
       assemble_time_terms();
 
       solve();
@@ -406,7 +406,7 @@ Monodomain::run()
         output_results();
 
       // update solutions
-      solution_old = solution;
+      u_old = u;
     }
   pcout << std::endl;
 }

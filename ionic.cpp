@@ -2,9 +2,15 @@
 
 void
 BuenoOrovio::setup(const IndexSet &locally_owned_dofs,
-                   const IndexSet &locally_relevant_dofs)
+                   const IndexSet &locally_relevant_dofs,
+                   const double   &dt)
 {
   TimerOutput::Scope t(timer, "Setup ionic model");
+
+
+  this->locally_owned_dofs    = locally_owned_dofs;
+  this->locally_relevant_dofs = locally_relevant_dofs;
+  this->dt                    = dt;
 
   for (unsigned int i = 0; i < N_VARS; ++i)
     {
@@ -80,8 +86,7 @@ BuenoOrovio::Iion_0d(const double                                   u_old,
 
 std::array<double, BuenoOrovio::N_VARS>
 BuenoOrovio::solve_0d(const double                                   u_old,
-                      const std::array<double, BuenoOrovio::N_VARS> &w,
-                      const double                                  &dt) const
+                      const std::array<double, BuenoOrovio::N_VARS> &w) const
 {
   std::array<double, N_VARS> w_new;
 
@@ -98,10 +103,7 @@ BuenoOrovio::solve_0d(const double                                   u_old,
 }
 
 void
-BuenoOrovio::solve(
-  const IndexSet                                   &locally_owned_dofs,
-  const LinearAlgebra::distributed::Vector<double> &solution_old,
-  const double                                     &dt)
+BuenoOrovio::solve(const LinearAlgebra::distributed::Vector<double> &u_old)
 {
   TimerOutput::Scope t(timer, "Update w and ion at DoFs");
 
@@ -111,17 +113,14 @@ BuenoOrovio::solve(
   for (const types::global_dof_index idx : locally_owned_dofs)
     {
       std::array<double, N_VARS> w_new =
-        solve_0d(solution_old[idx],
-                 {{w_old[0][idx], w_old[1][idx], w_old[2][idx]}},
-                 dt);
+        solve_0d(u_old[idx], {{w_old[0][idx], w_old[1][idx], w_old[2][idx]}});
 
       for (unsigned int i = 0; i < N_VARS; ++i)
         {
           w[i][idx] = w_new[i];
         }
 
-      Iion[idx] =
-        Iion_0d(solution_old[idx], {{w[0][idx], w[1][idx], w[2][idx]}});
+      Iion[idx] = Iion_0d(u_old[idx], {{w[0][idx], w[1][idx], w[2][idx]}});
     }
 
   Iion.update_ghost_values();

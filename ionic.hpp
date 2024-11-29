@@ -8,13 +8,16 @@
 class BuenoOrovio : public Common
 {
 public:
+  friend class Monodomain;
+
   static inline constexpr unsigned int N_VARS = 3;
 
   BuenoOrovio() = default;
 
   void
   setup(const IndexSet &locally_owned_dofs,
-        const IndexSet &locally_relevant_dofs);
+        const IndexSet &locally_relevant_dofs,
+        const double   &dt);
 
   std::array<double, N_VARS>
   alpha(const double u) const;
@@ -29,16 +32,17 @@ public:
   Iion_0d(const double u_old, const std::array<double, N_VARS> &w) const;
 
   std::array<double, N_VARS>
-  solve_0d(const double                      u_old,
-           const std::array<double, N_VARS> &w,
-           const double                     &dt) const;
+  solve_0d(const double u_old, const std::array<double, N_VARS> &w) const;
 
   void
-  solve(const IndexSet                                   &locally_owned_dofs,
-        const LinearAlgebra::distributed::Vector<double> &solution_old,
-        const double                                     &dt);
+  solve(const LinearAlgebra::distributed::Vector<double> &u_old);
 
-  // private:
+private:
+  IndexSet locally_owned_dofs;
+  IndexSet locally_relevant_dofs;
+
+  double dt;
+
   std::array<LinearAlgebra::distributed::Vector<double>, N_VARS> w_old;
   std::array<LinearAlgebra::distributed::Vector<double>, N_VARS> w;
 
