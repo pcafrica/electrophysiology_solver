@@ -302,7 +302,8 @@ Monodomain::output_results()
   const std::string filename_h5 = basename + "_" + std::to_string(time) + ".h5";
   const std::string filename_xdmf =
     basename + "_" + std::to_string(time) + ".xdmf";
-  const std::string filename_mesh = basename + "_" + std::to_string(0) + ".h5";
+  const std::string filename_mesh =
+    basename + "_" + std::to_string(0.0) + ".h5";
 
   DataOutBase::DataOutFilter data_filter(
     DataOutBase::DataOutFilterFlags(true, true));
