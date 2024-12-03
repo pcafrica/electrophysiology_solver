@@ -13,7 +13,7 @@
 #include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/lac/trilinos_precondition.h>
 #include <deal.II/lac/trilinos_sparse_matrix.h>
-
+#include <deal.II/base/parameter_acceptor.h>
 #include <deal.II/numerics/data_out.h>
 
 #include <cmath>
@@ -22,13 +22,15 @@
 #include "applied_current.hpp"
 #include "common.hpp"
 #include "ionic.hpp"
+#include "parameters_class.hpp"
 
 using namespace dealii;
 
 class Monodomain : public Common
 {
 public:
-  Monodomain();
+  Monodomain(const IonicModelParameters &model_params,
+             const SolverParameters &solver_params);
 
   void
   run();
@@ -47,6 +49,8 @@ private:
   void
   output_results();
 
+  BuenoOrovio ionic_model;
+  const SolverParameters &params;
   parallel::fullydistributed::Triangulation<dim> tria;
   MappingQ<dim>                                  mapping;
   FE_Q<dim>                                      fe;
@@ -73,21 +77,22 @@ private:
   const double dt;
   unsigned int time_step;
   const double time_end;
-
-  BuenoOrovio ionic_model;
 };
 
 
 
-Monodomain::Monodomain()
-  : tria(mpi_comm)
-  , mapping(1)
-  , fe(1)
+Monodomain::Monodomain(const IonicModelParameters &model_params,
+                       const SolverParameters &solver_params)
+  : ionic_model(model_params)
+  , params(solver_params)
+  , tria(mpi_comm)
+  , mapping(params.fe_degree)
+  , fe(params.fe_degree)
   , dof_handler(tria)
   , time(0)
-  , dt(1e-4)
-  , time_step(0)
-  , time_end(1)
+  , dt(params.dt)
+  , time_step(params.time_step)
+  , time_end(params.time_end)
 {}
 
 
@@ -391,8 +396,11 @@ int
 main(int argc, char *argv[])
 {
   Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
+  IonicModelParameters model_params;
+  SolverParameters solver_params;
+  ParameterAcceptor::initialize("../ionic_params.prm");
+  Monodomain problem(model_params, solver_params);
 
-  Monodomain problem;
   problem.run();
 
   return 0;

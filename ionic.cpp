@@ -1,12 +1,15 @@
 #include "ionic.hpp"
 
+BuenoOrovio::BuenoOrovio(const IonicModelParameters &params)
+  : params(params)
+  {}
+
 void
 BuenoOrovio::setup(const IndexSet &locally_owned_dofs,
                    const IndexSet &locally_relevant_dofs,
                    const double   &dt)
 {
   TimerOutput::Scope t(timer, "Setup ionic model");
-
 
   this->locally_owned_dofs    = locally_owned_dofs;
   this->locally_relevant_dofs = locally_relevant_dofs;
@@ -30,11 +33,11 @@ BuenoOrovio::alpha(const double u) const
 {
   std::array<double, N_VARS> a;
 
-  a[0] = (1.0 - utils::heaviside_sharp(u, V1)) /
-         (utils::heaviside_sharp(u, V1m) * (tau1pp - tau1p) + tau1p);
-  a[1] = (1.0 - utils::heaviside_sharp(u, V2)) /
-         (utils::heaviside(u, V2m, k2) * (tau2pp - tau2p) + tau2p);
-  a[2] = 1.0 / (utils::heaviside_sharp(u, V2) * (tau3pp - tau3p) + tau3p);
+  a[0] = (1.0 - utils::heaviside_sharp(u, params.V1)) /
+         (utils::heaviside_sharp(u, params.V1m) * (params.tau1pp - params.tau1p) + params.tau1p);
+  a[1] = (1.0 - utils::heaviside_sharp(u, params.V2)) /
+         (utils::heaviside(u, params.V2m, params.k2) * (params.tau2pp - params.tau2p) + params.tau2p);
+  a[2] = 1.0 / (utils::heaviside_sharp(u, params.V2) * (params.tau3pp - params.tau3p) + params.tau3p);
 
   return a;
 }
@@ -46,24 +49,22 @@ BuenoOrovio::beta(const double u) const
 {
   std::array<double, N_VARS> b;
 
-  b[0] = -utils::heaviside_sharp(u, V1) / tau1plus;
-  b[1] = -utils::heaviside_sharp(u, V2) / tau2plus;
+  b[0] = -utils::heaviside_sharp(u, params.V1) / params.tau1plus;
+  b[1] = -utils::heaviside_sharp(u, params.V2) / params.tau2plus;
   b[2] = 0;
 
   return b;
 }
-
-
 
 std::array<double, BuenoOrovio::N_VARS>
 BuenoOrovio::w_inf(const double u) const
 {
   std::array<double, N_VARS> wi;
 
-  wi[0] = 1.0 - utils::heaviside_sharp(u, V1m);
-  wi[1] = utils::heaviside_sharp(u, Vo) * (w_star_inf - 1.0 + u / tau2inf) +
-          1.0 - u / tau2inf;
-  wi[2] = utils::heaviside(u, V3, k3);
+  wi[0] = 1.0 - utils::heaviside_sharp(u, params.V1m);
+  wi[1] = utils::heaviside_sharp(u, params.Vo) * (params.w_star_inf - 1.0 + u / params.tau2inf) +
+          1.0 - u / params.tau2inf;
+  wi[2] = utils::heaviside(u, params.V3, params.k3);
 
   return wi;
 }
@@ -75,13 +76,13 @@ BuenoOrovio::Iion_0d(const double                                   u_old,
   TimerOutput::Scope t(timer, "Compute Iion");
 
   const double Iion_val =
-    utils::heaviside_sharp(u_old, V1) * (u_old - V1) * (Vhat - u_old) * w[0] /
-      taufi -
-    (1.0 - utils::heaviside_sharp(u_old, V2)) * (u_old - 0.) /
-      (utils::heaviside_sharp(u_old, Vo) * (tauopp - tauop) + tauop) -
-    utils::heaviside_sharp(u_old, V2) /
-      (utils::heaviside(u_old, Vso, kso) * (tausopp - tausop) + tausop) +
-    utils::heaviside_sharp(u_old, V2) * w[1] * w[2] / tausi;
+    utils::heaviside_sharp(u_old, params.V1) * (u_old - params.V1) * (params.Vhat - u_old) * w[0] /
+      params.taufi -
+    (1.0 - utils::heaviside_sharp(u_old, params.V2)) * (u_old - 0.) /
+      (utils::heaviside_sharp(u_old, params.Vo) * (params.tauopp - params.tauop) + params.tauop) -
+    utils::heaviside_sharp(u_old, params.V2) /
+      (utils::heaviside(u_old, params.Vso, params.kso) * (params.tausopp - params.tausop) + params.tausop) +
+    utils::heaviside_sharp(u_old, params.V2) * w[1] * w[2] / params.tausi;
 
   return -Iion_val;
 }

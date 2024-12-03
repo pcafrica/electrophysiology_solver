@@ -1,0 +1,39 @@
+# Parameters related to the BuenoOrovio model
+subsection Model Parameters
+      set V1            = 0.3
+      set V1m           = 0.015
+      set V2            = 0.015
+      set V2m           = 0.03
+      set V3            = 0.9087
+      set Vhat          = 1.58
+      set Vo            = 0.006
+      set Vso           = 0.65
+      set tauop         = 6e-3
+      set tauopp        = 6e-3
+      set tausop        = 43e-3
+      set tausopp       = 0.2e-3
+      set tausi         = 2.8723e-3
+      set taufi         = 0.11e-3
+      set tau1plus      = 1.4506e-3
+      set tau2plus      = 0.28
+      set tau2inf       = 0.07
+      set tau1p         = 0.06
+      set tau1pp        = 1.15
+      set tau2p         = 0.07
+      set tau2pp        = 0.02
+      set tau3p         = 2.7342e-3
+      set tau3pp        = 0.003
+      set w_star_inf    = 0.94
+      set k2            = 65.0
+      set k3            = 2.0994
+      set kso           = 2.0
+end
+
+# Parameters related to the FE solver
+subsection Solver Parameters
+    set fe_degree   = 2
+    set dt          = 1e-4
+    set time_step   = 0
+    set time_end    = 1
+end
+
