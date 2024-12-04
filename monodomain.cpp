@@ -1,3 +1,5 @@
+#include <deal.II/base/parameter_acceptor.h>
+
 #include <deal.II/distributed/fully_distributed_tria.h>
 
 #include <deal.II/dofs/dof_tools.h>
@@ -13,7 +15,7 @@
 #include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/lac/trilinos_precondition.h>
 #include <deal.II/lac/trilinos_sparse_matrix.h>
-#include <deal.II/base/parameter_acceptor.h>
+
 #include <deal.II/numerics/data_out.h>
 
 #include <cmath>
@@ -22,15 +24,33 @@
 #include "applied_current.hpp"
 #include "common.hpp"
 #include "ionic.hpp"
-#include "parameters_class.hpp"
 
 using namespace dealii;
 
 class Monodomain : public Common
 {
 public:
-  Monodomain(const IonicModelParameters &model_params,
-             const SolverParameters &solver_params);
+  class Parameters : public ParameterAcceptor
+  {
+  public:
+    Parameters()
+      : ParameterAcceptor("Monodomain solver")
+    {
+      add_parameter("fe_degree", fe_degree, "Finite Element degree");
+      add_parameter("dt", dt, "Time step");
+      add_parameter("time_end", time_end, "Final time");
+      add_parameter("sigma", sigma, "Conductivity");
+    }
+
+    int    fe_degree = 1;
+    double dt        = 1e-3;
+    double time_end  = 1.;
+
+    double sigma = 1e-4;
+  };
+
+  Monodomain(const BuenoOrovio::Parameters &model_params,
+             const Parameters              &solver_params);
 
   void
   run();
@@ -49,8 +69,8 @@ private:
   void
   output_results();
 
-  BuenoOrovio ionic_model;
-  const SolverParameters &params;
+  BuenoOrovio                                    ionic_model;
+  const Parameters                              &params;
   parallel::fullydistributed::Triangulation<dim> tria;
   MappingQ<dim>                                  mapping;
   FE_Q<dim>                                      fe;
@@ -81,8 +101,8 @@ private:
 
 
 
-Monodomain::Monodomain(const IonicModelParameters &model_params,
-                       const SolverParameters &solver_params)
+Monodomain::Monodomain(const BuenoOrovio::Parameters &model_params,
+                       const Parameters              &solver_params)
   : ionic_model(model_params)
   , params(solver_params)
   , tria(mpi_comm)
@@ -91,7 +111,7 @@ Monodomain::Monodomain(const IonicModelParameters &model_params,
   , dof_handler(tria)
   , time(0)
   , dt(params.dt)
-  , time_step(params.time_step)
+  , time_step(0)
   , time_end(params.time_end)
 {}
 
@@ -171,7 +191,7 @@ Monodomain::assemble_time_independent_matrix()
                 {
                   for (unsigned int j = 0; j < dofs_per_cell; ++j)
                     {
-                      cell_matrix(i, j) += 1e-4 * // sigma
+                      cell_matrix(i, j) += params.sigma *
                                            fe_values->shape_grad(i, q_index) *
                                            fe_values->shape_grad(j, q_index) *
                                            fe_values->JxW(q_index);
@@ -396,9 +416,11 @@ int
 main(int argc, char *argv[])
 {
   Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
-  IonicModelParameters model_params;
-  SolverParameters solver_params;
+
+  Monodomain::Parameters  solver_params;
+  BuenoOrovio::Parameters model_params;
   ParameterAcceptor::initialize("../ionic_params.prm");
+
   Monodomain problem(model_params, solver_params);
 
   problem.run();

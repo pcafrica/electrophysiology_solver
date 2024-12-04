@@ -1,8 +1,8 @@
 #include "ionic.hpp"
 
-BuenoOrovio::BuenoOrovio(const IonicModelParameters &params)
+BuenoOrovio::BuenoOrovio(const Parameters &params)
   : params(params)
-  {}
+{}
 
 void
 BuenoOrovio::setup(const IndexSet &locally_owned_dofs,
@@ -33,11 +33,17 @@ BuenoOrovio::alpha(const double u) const
 {
   std::array<double, N_VARS> a;
 
-  a[0] = (1.0 - utils::heaviside_sharp(u, params.V1)) /
-         (utils::heaviside_sharp(u, params.V1m) * (params.tau1pp - params.tau1p) + params.tau1p);
+  a[0] =
+    (1.0 - utils::heaviside_sharp(u, params.V1)) /
+    (utils::heaviside_sharp(u, params.V1m) * (params.tau1pp - params.tau1p) +
+     params.tau1p);
   a[1] = (1.0 - utils::heaviside_sharp(u, params.V2)) /
-         (utils::heaviside(u, params.V2m, params.k2) * (params.tau2pp - params.tau2p) + params.tau2p);
-  a[2] = 1.0 / (utils::heaviside_sharp(u, params.V2) * (params.tau3pp - params.tau3p) + params.tau3p);
+         (utils::heaviside(u, params.V2m, params.k2) *
+            (params.tau2pp - params.tau2p) +
+          params.tau2p);
+  a[2] = 1.0 / (utils::heaviside_sharp(u, params.V2) *
+                  (params.tau3pp - params.tau3p) +
+                params.tau3p);
 
   return a;
 }
@@ -62,7 +68,8 @@ BuenoOrovio::w_inf(const double u) const
   std::array<double, N_VARS> wi;
 
   wi[0] = 1.0 - utils::heaviside_sharp(u, params.V1m);
-  wi[1] = utils::heaviside_sharp(u, params.Vo) * (params.w_star_inf - 1.0 + u / params.tau2inf) +
+  wi[1] = utils::heaviside_sharp(u, params.Vo) *
+            (params.w_star_inf - 1.0 + u / params.tau2inf) +
           1.0 - u / params.tau2inf;
   wi[2] = utils::heaviside(u, params.V3, params.k3);
 
@@ -76,12 +83,16 @@ BuenoOrovio::Iion_0d(const double                                   u_old,
   TimerOutput::Scope t(timer, "Compute Iion");
 
   const double Iion_val =
-    utils::heaviside_sharp(u_old, params.V1) * (u_old - params.V1) * (params.Vhat - u_old) * w[0] /
-      params.taufi -
+    utils::heaviside_sharp(u_old, params.V1) * (u_old - params.V1) *
+      (params.Vhat - u_old) * w[0] / params.taufi -
     (1.0 - utils::heaviside_sharp(u_old, params.V2)) * (u_old - 0.) /
-      (utils::heaviside_sharp(u_old, params.Vo) * (params.tauopp - params.tauop) + params.tauop) -
+      (utils::heaviside_sharp(u_old, params.Vo) *
+         (params.tauopp - params.tauop) +
+       params.tauop) -
     utils::heaviside_sharp(u_old, params.V2) /
-      (utils::heaviside(u_old, params.Vso, params.kso) * (params.tausopp - params.tausop) + params.tausop) +
+      (utils::heaviside(u_old, params.Vso, params.kso) *
+         (params.tausopp - params.tausop) +
+       params.tausop) +
     utils::heaviside_sharp(u_old, params.V2) * w[1] * w[2] / params.tausi;
 
   return -Iion_val;
