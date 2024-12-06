@@ -13,6 +13,9 @@ subsection Monodomain solver
   # Final time
   set time_end  = 1
 
+  #Mapping degree
+  set map_degree = 1
+
 
   subsection Bueno-Orovio
     set V1         = 0.4

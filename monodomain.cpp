@@ -40,6 +40,7 @@ public:
       add_parameter("dt", dt, "Time step");
       add_parameter("time_end", time_end, "Final time");
       add_parameter("sigma", sigma, "Conductivity");
+      add_parameter("map_degree", map_degree, "Map Degree");
     }
 
     int    fe_degree = 1;
@@ -47,6 +48,8 @@ public:
     double time_end  = 1.;
 
     double sigma = 1e-4;
+
+    int map_degree = 0;
   };
 
   Monodomain(const BuenoOrovio::Parameters &model_params,
@@ -106,7 +109,7 @@ Monodomain::Monodomain(const BuenoOrovio::Parameters &model_params,
   : ionic_model(model_params)
   , params(solver_params)
   , tria(mpi_comm)
-  , mapping(params.fe_degree)
+  , mapping(params.map_degree)
   , fe(params.fe_degree)
   , dof_handler(tria)
   , time(0)
