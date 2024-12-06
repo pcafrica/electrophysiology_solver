@@ -1,10 +1,11 @@
 #include "applied_current.hpp"
 
-AppliedCurrent::AppliedCurrent()
+AppliedCurrent::AppliedCurrent(const Parameters &params)
   : Function<dim>()
-  , p1{-0.015598, -0.0173368, 0.0307704}
-  , p2{0.0264292, -0.0043322, 0.0187656}
-  , p3{0.00155326, 0.0252701, 0.0248006}
+  , params(params)
+  , p1(params.p1)
+  , p2(params.p2)
+  , p3(params.p3)
 {
   p.push_back(p1);
   p.push_back(p2);

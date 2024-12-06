@@ -16,6 +16,11 @@ subsection Monodomain solver
   #Mapping degree
   set map_degree = 1
 
+  subsection Applied-Current
+    set p1 = -0.015598, -0.0173368, 0.0307704
+    set p2 = 0.0264292, -0.0043322, 0.0187656
+    set p3 = 0.00155326, 0.0252701, 0.0248006
+  end
 
   subsection Bueno-Orovio
     set V1         = 0.4
@@ -46,6 +51,7 @@ subsection Monodomain solver
     set tausopp    = 0.0002
     set w_star_inf = 0.94
   end
+
 
 end
 

@@ -52,8 +52,9 @@ public:
     int map_degree = 0;
   };
 
-  Monodomain(const BuenoOrovio::Parameters &model_params,
-             const Parameters              &solver_params);
+  Monodomain(const BuenoOrovio::Parameters     &model_params,
+             const Parameters                  &solver_params,
+             const AppliedCurrent::Parameters  &applied_current_params);
 
   void
   run();
@@ -73,7 +74,8 @@ private:
   output_results();
 
   BuenoOrovio                                    ionic_model;
-  const Parameters                              &params;
+  const Parameters                               &params;
+  std::unique_ptr<Function<dim>>                 Iapp;
   parallel::fullydistributed::Triangulation<dim> tria;
   MappingQ<dim>                                  mapping;
   FE_Q<dim>                                      fe;
@@ -85,7 +87,7 @@ private:
   TrilinosWrappers::SparseMatrix                 laplace_matrix;
   TrilinosWrappers::SparseMatrix                 system_matrix;
   LinearAlgebra::distributed::Vector<double>     system_rhs;
-  std::unique_ptr<Function<dim>>                 Iapp;
+
 
   std::unique_ptr<FEValues<dim>> fe_values;
 
@@ -104,10 +106,12 @@ private:
 
 
 
-Monodomain::Monodomain(const BuenoOrovio::Parameters &model_params,
-                       const Parameters              &solver_params)
+Monodomain::Monodomain(const BuenoOrovio::Parameters     &model_params,
+                       const Parameters                  &solver_params,
+                       const AppliedCurrent::Parameters  &applied_current_params)
   : ionic_model(model_params)
   , params(solver_params)
+  , Iapp(std::make_unique<AppliedCurrent>(applied_current_params))
   , tria(mpi_comm)
   , mapping(params.map_degree)
   , fe(params.fe_degree)
@@ -116,6 +120,7 @@ Monodomain::Monodomain(const BuenoOrovio::Parameters &model_params,
   , dt(params.dt)
   , time_step(0)
   , time_end(params.time_end)
+
 {}
 
 
@@ -155,8 +160,6 @@ Monodomain::setup()
   u_old.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
   u.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
   system_rhs.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
-
-  Iapp = std::make_unique<AppliedCurrent>();
 
   ionic_model.setup(locally_owned_dofs, locally_relevant_dofs, dt);
 }
@@ -422,9 +425,10 @@ main(int argc, char *argv[])
 
   Monodomain::Parameters  solver_params;
   BuenoOrovio::Parameters model_params;
+  AppliedCurrent::Parameters applied_current_params;
   ParameterAcceptor::initialize("../ionic_params.prm");
 
-  Monodomain problem(model_params, solver_params);
+  Monodomain problem(model_params, solver_params, applied_current_params);
 
   problem.run();
 
