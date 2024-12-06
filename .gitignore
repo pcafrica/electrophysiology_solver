@@ -5,6 +5,7 @@ build*
 compile_commands.json*
 
 *.msh
+*.prm
 
 # VS Code
 .vscode/

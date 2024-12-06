@@ -37,24 +37,24 @@ public:
       : ParameterAcceptor("Monodomain solver")
     {
       add_parameter("fe_degree", fe_degree, "Finite Element degree");
+      add_parameter("map_degree", map_degree, "Mapping degree");
       add_parameter("dt", dt, "Time step");
       add_parameter("time_end", time_end, "Final time");
       add_parameter("sigma", sigma, "Conductivity");
-      add_parameter("map_degree", map_degree, "Map Degree");
     }
 
-    int    fe_degree = 1;
-    double dt        = 1e-3;
-    double time_end  = 1.;
+    unsigned int fe_degree  = 1;
+    unsigned int map_degree = 0;
+
+    double dt       = 1e-3;
+    double time_end = 1.;
 
     double sigma = 1e-4;
-
-    int map_degree = 0;
   };
 
-  Monodomain(const BuenoOrovio::Parameters     &model_params,
-             const Parameters                  &solver_params,
-             const AppliedCurrent::Parameters  &applied_current_params);
+  Monodomain(const Parameters                 &solver_params,
+             const BuenoOrovio::Parameters    &ionic_model_params,
+             const AppliedCurrent::Parameters &applied_current_params);
 
   void
   run();
@@ -73,8 +73,10 @@ private:
   void
   output_results();
 
-  BuenoOrovio                                    ionic_model;
-  const Parameters                               &params;
+  const Parameters              &params;
+  std::unique_ptr<BuenoOrovio>   ionic_model;
+  std::unique_ptr<FEValues<dim>> fe_values;
+
   std::unique_ptr<Function<dim>>                 Iapp;
   parallel::fullydistributed::Triangulation<dim> tria;
   MappingQ<dim>                                  mapping;
@@ -87,9 +89,6 @@ private:
   TrilinosWrappers::SparseMatrix                 laplace_matrix;
   TrilinosWrappers::SparseMatrix                 system_matrix;
   LinearAlgebra::distributed::Vector<double>     system_rhs;
-
-
-  std::unique_ptr<FEValues<dim>> fe_values;
 
   IndexSet locally_owned_dofs;
   IndexSet locally_relevant_dofs;
@@ -106,11 +105,11 @@ private:
 
 
 
-Monodomain::Monodomain(const BuenoOrovio::Parameters     &model_params,
-                       const Parameters                  &solver_params,
-                       const AppliedCurrent::Parameters  &applied_current_params)
-  : ionic_model(model_params)
-  , params(solver_params)
+Monodomain::Monodomain(const Parameters                 &solver_params,
+                       const BuenoOrovio::Parameters    &ionic_model_params,
+                       const AppliedCurrent::Parameters &applied_current_params)
+  : params(solver_params)
+  , ionic_model(std::make_unique<BuenoOrovio>(ionic_model_params))
   , Iapp(std::make_unique<AppliedCurrent>(applied_current_params))
   , tria(mpi_comm)
   , mapping(params.map_degree)
@@ -161,7 +160,7 @@ Monodomain::setup()
   u.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
   system_rhs.reinit(locally_owned_dofs, locally_relevant_dofs, mpi_comm);
 
-  ionic_model.setup(locally_owned_dofs, locally_relevant_dofs, dt);
+  ionic_model->setup(locally_owned_dofs, locally_relevant_dofs, dt);
 }
 
 
@@ -252,7 +251,7 @@ Monodomain::assemble_time_terms()
           Iapp->value_list(q_points, applied_currents);
 
           std::vector<double> ion_at_qpoints(n_qpoints);
-          fe_values->get_function_values(ionic_model.Iion, ion_at_qpoints);
+          fe_values->get_function_values(ionic_model->Iion, ion_at_qpoints);
 
           cell->get_dof_indices(local_dof_indices);
 
@@ -312,9 +311,9 @@ Monodomain::output_results()
                            DataOut<dim>::type_dof_data);
 
   //
-  for (unsigned int i = 0; i < ionic_model.w.size(); ++i)
+  for (unsigned int i = 0; i < ionic_model->w.size(); ++i)
     {
-      data_out.add_data_vector(ionic_model.w[i],
+      data_out.add_data_vector(ionic_model->w[i],
                                "w" + std::to_string(i),
                                DataOut<dim>::type_dof_data);
     }
@@ -401,7 +400,7 @@ Monodomain::run()
       time += dt;
       Iapp->set_time(time);
 
-      ionic_model.solve(u_old);
+      ionic_model->solve(u_old);
       assemble_time_terms();
 
       solve();
@@ -423,12 +422,12 @@ main(int argc, char *argv[])
 {
   Utilities::MPI::MPI_InitFinalize mpi_initialization(argc, argv, 1);
 
-  Monodomain::Parameters  solver_params;
-  BuenoOrovio::Parameters model_params;
+  Monodomain::Parameters     monodomain_params;
+  BuenoOrovio::Parameters    ionic_model_params;
   AppliedCurrent::Parameters applied_current_params;
   ParameterAcceptor::initialize("../ionic_params.prm");
 
-  Monodomain problem(model_params, solver_params, applied_current_params);
+  Monodomain problem(monodomain_params, ionic_model_params, applied_current_params);
 
   problem.run();
 
