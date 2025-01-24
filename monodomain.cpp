@@ -44,7 +44,7 @@ public:
     }
 
     unsigned int fe_degree  = 1;
-    unsigned int map_degree = 0;
+    unsigned int map_degree = 1;
 
     double dt       = 1e-3;
     double time_end = 1.;
@@ -425,7 +425,7 @@ main(int argc, char *argv[])
   Monodomain::Parameters     monodomain_params;
   BuenoOrovio::Parameters    ionic_model_params;
   AppliedCurrent::Parameters applied_current_params;
-  ParameterAcceptor::initialize("../ionic_params.prm");
+  ParameterAcceptor::initialize("../params.prm");
 
   Monodomain problem(monodomain_params, ionic_model_params, applied_current_params);
 
