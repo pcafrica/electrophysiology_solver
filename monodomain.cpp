@@ -46,7 +46,7 @@ public:
     unsigned int fe_degree  = 1;
     unsigned int map_degree = 1;
 
-    double dt       = 1e-3;
+    double dt       = 1e-4;
     double time_end = 1.;
 
     double sigma = 1e-4;
