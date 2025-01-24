@@ -19,7 +19,8 @@ BuenoOrovio::setup(const IndexSet &locally_owned_dofs,
     {
       w_old[i].reinit(locally_owned_dofs, mpi_comm);
       w[i].reinit(locally_owned_dofs, mpi_comm);
-      w_old[i] = 1.;
+
+      w_old[i] = (i < 2);
       w[i]     = w_old[i];
     }
 
@@ -123,8 +124,8 @@ BuenoOrovio::solve(const LinearAlgebra::distributed::Vector<double> &u_old)
 {
   TimerOutput::Scope t(timer, "Update w and Iion at DoFs");
 
-  // update w from t_n to t_{n+1} on the locally owned DoFs for all w's
-  // On top of that, evaluate Iion at DoFs
+  // Update w from t_n to t_{n+1} on the locally owned DoFs for all w's.
+  // On top of that, evaluate Iion at DoFs.
   Iion.zero_out_ghost_values();
   for (const types::global_dof_index idx : locally_owned_dofs)
     {
